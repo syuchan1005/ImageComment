@@ -1,0 +1,42 @@
+<idea-plugin>
+    <version>1.0.0</version>
+    <id>com.github.syuchan1005.ImageComment</id>
+    <name>ImageComment</name>
+    <vendor email="syuchan.dev@gmail.com" url="https://twitter.com/syu_chan_1005">syuchan1005</vendor>
+
+    <description><![CDATA[
+       <h2>Do you think that intention will be transmitted only by the character of the comment?</h2>
+       <br/>
+       <h2>No. We need images.</h2>
+       <br/>
+       <br/>
+       <h2>Getting Started</span>
+       <br/>
+       <ol>
+         <li>Write `![imageAlt](/path/to/image)` in comment!</li>
+       </ol>
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <i>Implemented enhancements: </i>
+        <ul>
+            <li>Show gutter icons</li>
+            <li>Show thumbnail when hovering comment</li>
+        </ul>
+    ]]></change-notes>
+
+    <idea-version since-build="182.0" />
+
+    <extensions defaultExtensionNs="com.intellij">
+        <codeInsight.lineMarkerProvider language="" implementationClass="com.github.syuchan1005.imagecomment.ImageLineMarkerProvider" />
+
+        <applicationConfigurable groupId="tools" displayName="ImageComment" instance="com.github.syuchan1005.imagecomment.setting.ImageCommentConfigurable" />
+        <applicationService serviceImplementation="com.github.syuchan1005.imagecomment.setting.ImageCommentData" />
+    </extensions>
+
+    <project-components>
+        <component>
+            <implementation-class>com.github.syuchan1005.imagecomment.MouseHoverHandler</implementation-class>
+        </component>
+    </project-components>
+</idea-plugin>

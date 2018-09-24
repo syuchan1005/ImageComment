@@ -1,0 +1,31 @@
+plugins {
+    id 'org.jetbrains.intellij' version '0.3.11'
+}
+
+apply plugin: 'idea'
+apply plugin: 'org.jetbrains.intellij'
+apply plugin: 'java'
+
+sourceCompatibility = 1.8
+
+group 'com.github.syuchan1005'
+
+repositories {
+    mavenCentral()
+}
+
+compileJava {
+    options.encoding = 'UTF-8'
+}
+
+intellij {
+    // https://www.jetbrains.com/intellij-repository/releases
+    version 'LATEST-EAP-SNAPSHOT'
+    type 'IU'
+}
+
+patchPluginXml {
+    version null
+    sinceBuild null
+    untilBuild null
+}
