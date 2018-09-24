@@ -7,3 +7,8 @@ Do you think that intention will be transmitted only by the character of the com
 
 ### Getting Started
 1. Write `![imageAlt](/path/to/image)` in comment!
+
+## UI
+||
+|:--:|
+|![Editor](screenshot/sample.png)|
