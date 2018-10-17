@@ -20,12 +20,11 @@ compileJava {
 
 intellij {
     // https://www.jetbrains.com/intellij-repository/releases
-    version 'LATEST-EAP-SNAPSHOT'
-    type 'IU'
+    version 'IC-2018.2'
 }
 
 patchPluginXml {
     version null
-    sinceBuild null
+    sinceBuild '182'
     untilBuild null
 }

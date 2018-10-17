@@ -1,5 +1,5 @@
 <idea-plugin>
-    <version>1.0.1</version>
+    <version>1.0.2</version>
     <id>com.github.syuchan1005.ImageComment</id>
     <name>ImageComment</name>
     <vendor email="syuchan.dev@gmail.com" url="https://twitter.com/syu_chan_1005">syuchan1005</vendor>
@@ -19,8 +19,6 @@
             <li>Show thumbnail when hovering comment</li>
         </ul>
     ]]></change-notes>
-
-    <idea-version since-build="182.0" />
 
     <extensions defaultExtensionNs="com.intellij">
         <codeInsight.lineMarkerProvider language="" implementationClass="com.github.syuchan1005.imagecomment.ImageLineMarkerProvider" />

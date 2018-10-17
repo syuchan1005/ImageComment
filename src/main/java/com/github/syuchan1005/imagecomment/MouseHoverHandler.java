@@ -16,8 +16,10 @@ import com.intellij.openapi.editor.LogicalPosition;
 import com.intellij.openapi.editor.event.CaretEvent;
 import com.intellij.openapi.editor.event.CaretListener;
 import com.intellij.openapi.editor.event.EditorEventMulticaster;
+import com.intellij.openapi.editor.event.EditorMouseAdapter;
 import com.intellij.openapi.editor.event.EditorMouseEvent;
 import com.intellij.openapi.editor.event.EditorMouseListener;
+import com.intellij.openapi.editor.event.EditorMouseMotionAdapter;
 import com.intellij.openapi.editor.event.EditorMouseMotionListener;
 import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.progress.ProgressIndicator;
@@ -69,7 +71,7 @@ public class MouseHoverHandler implements ProjectComponent {
 	@NotNull
 	private final Alarm myTooltipAlarm;
 
-	private final EditorMouseListener myEditorMouseListener = new EditorMouseListener() {
+	private final EditorMouseListener myEditorMouseListener = new EditorMouseAdapter() {
 		@Override
 		public void mouseReleased(@NotNull EditorMouseEvent e) {
 			myTooltipAlarm.cancelAllRequests();
@@ -77,7 +79,7 @@ public class MouseHoverHandler implements ProjectComponent {
 		}
 	};
 
-	private final EditorMouseMotionListener myEditorMouseMotionListener = new EditorMouseMotionListener() {
+	private final EditorMouseMotionListener myEditorMouseMotionListener = new EditorMouseMotionAdapter() {
 		@Override
 		public void mouseMoved(@NotNull EditorMouseEvent e) {
 			if (myHint != null) {
@@ -253,7 +255,7 @@ public class MouseHoverHandler implements ProjectComponent {
 	}
 
 	@Nullable
-	private Info getInfoAt(final Editor editor, PsiFile file, int offset, BrowseMode browseMode) {
+	private Info getInfoAt(PsiFile file, int offset, BrowseMode browseMode) {
 		if (browseMode == BrowseMode.Hover) {
 			if (PowerSaveMode.isEnabled() || !myData.isHover) return null;
 			final PsiElement elementAtPointer = file.findElementAt(offset);
@@ -284,16 +286,16 @@ public class MouseHoverHandler implements ProjectComponent {
 		private BrowseMode myBrowseMode;
 		private boolean myDisposed;
 
-		public TooltipProvider(Editor editor, LogicalPosition pos) {
+		TooltipProvider(Editor editor, LogicalPosition pos) {
 			myEditor = editor;
 			myPosition = pos;
 		}
 
-		public void dispose() {
+		void dispose() {
 			myDisposed = true;
 		}
 
-		public void execute(BrowseMode browseMode) {
+		void execute(BrowseMode browseMode) {
 			if (myEditor.isDisposed()) return;
 
 			myBrowseMode = browseMode;
@@ -312,77 +314,69 @@ public class MouseHoverHandler implements ProjectComponent {
 			int selEnd = myEditor.getSelectionModel().getSelectionEnd();
 
 			if (offset >= selStart && offset < selEnd) return;
-			ApplicationManager.getApplication().executeOnPooledThread(new Runnable() {
-				@Override
-				public void run() {
+			ApplicationManager.getApplication().executeOnPooledThread(() ->
 					ProgressIndicatorUtils.scheduleWithWriteActionPriority(new ReadTask() {
-						@Override
-						public void computeInReadAction(@NotNull ProgressIndicator indicator) {
-							doExecute(file, offset);
-						}
-
-						@Override
-						public void onCanceled(@NotNull ProgressIndicator indicator) {
-						}
-					});
+				@Override
+				public void computeInReadAction(@NotNull ProgressIndicator indicator) {
+					doExecute(file, offset);
 				}
-			});
+
+				@Override
+				public void onCanceled(@NotNull ProgressIndicator indicator) {
+				}
+			}));
 		}
 
 		private void doExecute(PsiFile file, int offset) {
 			final Info info;
 			try {
-				info = getInfoAt(myEditor, file, offset, myBrowseMode);
+				info = getInfoAt(file, offset, myBrowseMode);
 			} catch (IndexNotReadyException e) {
 				showDumbModeNotification(myProject);
 				return;
 			}
 			if (info == null) return;
 
-			ApplicationManager.getApplication().invokeLater(new Runnable() {
-				@Override
-				public void run() {
-					if (myDisposed || myEditor.isDisposed() ||
-							!myEditor.getComponent().isShowing() || !info.isValid(myEditor.getDocument())) return;
+			ApplicationManager.getApplication().invokeLater(() -> {
+				if (myDisposed || myEditor.isDisposed() ||
+						!myEditor.getComponent().isShowing() || !info.isValid(myEditor.getDocument())) return;
 
-					DocInfo docInfo = info.getInfo();
-					if (docInfo.text == null) return;
+				DocInfo docInfo = info.getInfo();
+				if (docInfo.text == null) return;
 
-					if (myDocumentationManager.hasActiveDockedDocWindow()) {
-						info.showDocInfo(myDocumentationManager);
-					}
-
-					if (docInfo.documentationAnchor == null) return;
-					URL absoluteURL = CommentUtil.getAbsoluteURL(docInfo.documentationAnchor, docInfo.text);
-					CommentUtil.ImageData imageData = CommentUtil.loadImage(absoluteURL);
-					if (imageData == null) return;
-
-					LightweightHint hint = new LightweightHint(new JLabel(new ImageIcon(imageData.getThumbnail())));
-					myHint = hint;
-					hint.addHintListener(event -> myHint = null);
-					myDocAlarm.cancelAllRequests();
-
-					HintManagerImpl hintManager = HintManagerImpl.getInstanceImpl();
-					Point p = HintManagerImpl.getHintPosition(hint, myEditor, myPosition, HintManager.ABOVE);
-					hintManager.showEditorHint(hint, myEditor, p,
-							HintManager.HIDE_BY_ESCAPE | HintManager.HIDE_BY_TEXT_CHANGE | HintManager.HIDE_BY_SCROLLING,
-							0, false, HintManagerImpl.createHintHint(myEditor, p, hint, HintManager.ABOVE).setContentActive(false));
+				if (myDocumentationManager.hasActiveDockedDocWindow()) {
+					info.showDocInfo(myDocumentationManager);
 				}
+
+				if (docInfo.documentationAnchor == null) return;
+				URL absoluteURL = CommentUtil.getAbsoluteURL(docInfo.documentationAnchor, docInfo.text);
+				CommentUtil.ImageData imageData = CommentUtil.loadImage(absoluteURL);
+				if (imageData == null) return;
+
+				LightweightHint hint = new LightweightHint(new JLabel(new ImageIcon(imageData.getThumbnail())));
+				myHint = hint;
+				hint.addHintListener(event -> myHint = null);
+				myDocAlarm.cancelAllRequests();
+
+				HintManagerImpl hintManager = HintManagerImpl.getInstanceImpl();
+				Point p = HintManagerImpl.getHintPosition(hint, myEditor, myPosition, HintManager.ABOVE);
+				hintManager.showEditorHint(hint, myEditor, p,
+						HintManager.HIDE_BY_ESCAPE | HintManager.HIDE_BY_TEXT_CHANGE | HintManager.HIDE_BY_SCROLLING,
+						0, false, HintManagerImpl.createHintHint(myEditor, p, hint, HintManager.ABOVE).setContentActive(false));
 			});
 		}
 
 	}
 
 	private static class DocInfo {
+		static final DocInfo EMPTY = new DocInfo(null, null, null);
 
-		public static final DocInfo EMPTY = new DocInfo(null, null, null);
-
 		@Nullable
-		public final String text;
+		final String text;
 		@Nullable
-		public final DocumentationProvider docProvider;
+		final DocumentationProvider docProvider;
 		@Nullable
-		public final PsiElement documentationAnchor;
+		final PsiElement documentationAnchor;
 
 		DocInfo(@Nullable String text, @Nullable DocumentationProvider provider, @Nullable PsiElement documentationAnchor) {
 			this.text = text;
