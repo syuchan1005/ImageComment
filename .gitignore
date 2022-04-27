@@ -1,9 +1,4 @@
-.idea/
-.gradle/
-*.java~
-*.jar
-
-out/
-build/
-
-*.iml
+.gradle
+.idea
+.qodana
+build
