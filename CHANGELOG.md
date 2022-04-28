@@ -5,6 +5,7 @@
 ## [Unreleased]
 ### Changed
 - Apply scaffold from [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template)
+- Rewrite lineMarkerProvider
 
 ## [1.0.2] - 2018-10-17
 ### Fixed

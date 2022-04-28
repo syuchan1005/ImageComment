@@ -38,350 +38,370 @@ import com.intellij.psi.PsiFile;
 import com.intellij.ui.LightweightHint;
 import com.intellij.ui.ScreenUtil;
 import com.intellij.util.Alarm;
-import java.awt.Point;
-import java.awt.Rectangle;
+
+import java.awt.*;
 import java.awt.event.MouseEvent;
-import java.net.URL;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.Collections;
 import java.util.List;
+import javax.imageio.ImageIO;
 import javax.swing.ImageIcon;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+
+import com.intellij.util.ui.ImageUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 public class MouseHoverHandler implements ProjectComponent {
-	private enum BrowseMode {None, Hover}
 
-	private TooltipProvider myTooltipProvider = null;
+    private static final double THUMBNAIL_SIZE = 200;
 
-	private final DocumentationManager myDocumentationManager;
+    private enum BrowseMode {None, Hover}
 
-	@Nullable
-	private Point myPrevMouseLocation;
+    private TooltipProvider myTooltipProvider = null;
 
-	private LightweightHint myHint;
+    private final DocumentationManager myDocumentationManager;
 
-	private Project myProject;
+    @Nullable
+    private Point myPrevMouseLocation;
 
-	private ImageCommentData myData;
+    private LightweightHint myHint;
 
-	@NotNull
-	private final Alarm myDocAlarm;
-	@NotNull
-	private final Alarm myTooltipAlarm;
+    private Project myProject;
 
-	private final EditorMouseListener myEditorMouseListener = new EditorMouseAdapter() {
-		@Override
-		public void mouseReleased(@NotNull EditorMouseEvent e) {
-			myTooltipAlarm.cancelAllRequests();
-			myTooltipProvider = null;
-		}
-	};
+    private ImageCommentData myData;
 
-	private final EditorMouseMotionListener myEditorMouseMotionListener = new EditorMouseMotionAdapter() {
-		@Override
-		public void mouseMoved(@NotNull EditorMouseEvent e) {
-			if (myHint != null) {
-				HintManager.getInstance().hideAllHints();
-				myHint = null;
-			}
+    @NotNull
+    private final Alarm myDocAlarm;
+    @NotNull
+    private final Alarm myTooltipAlarm;
 
-			if (e.isConsumed() || !myProject.isInitialized()) {
-				return;
-			}
-			MouseEvent mouseEvent = e.getMouseEvent();
+    private final EditorMouseListener myEditorMouseListener = new EditorMouseAdapter() {
+        @Override
+        public void mouseReleased(@NotNull EditorMouseEvent e) {
+            myTooltipAlarm.cancelAllRequests();
+            myTooltipProvider = null;
+        }
+    };
 
-			if (isMouseOverTooltip(mouseEvent.getLocationOnScreen())
-					|| ScreenUtil.isMovementTowards(myPrevMouseLocation, mouseEvent.getLocationOnScreen(), getHintBounds())) {
-				myPrevMouseLocation = mouseEvent.getLocationOnScreen();
-				return;
-			}
-			myPrevMouseLocation = mouseEvent.getLocationOnScreen();
+    private final EditorMouseMotionListener myEditorMouseMotionListener = new EditorMouseMotionAdapter() {
+        @Override
+        public void mouseMoved(@NotNull EditorMouseEvent e) {
+            if (myHint != null) {
+                HintManager.getInstance().hideAllHints();
+                myHint = null;
+            }
 
-			Editor editor = e.getEditor();
-			if (editor.getProject() != null && editor.getProject() != myProject) return;
+            if (e.isConsumed() || !myProject.isInitialized()) {
+                return;
+            }
+            MouseEvent mouseEvent = e.getMouseEvent();
 
-			Point point = new Point(mouseEvent.getPoint());
-			final LogicalPosition pos = editor.xyToLogicalPosition(point);
-			int offset = editor.logicalPositionToOffset(pos);
-			int selStart = editor.getSelectionModel().getSelectionStart();
-			int selEnd = editor.getSelectionModel().getSelectionEnd();
+            if (isMouseOverTooltip(mouseEvent.getLocationOnScreen())
+                    || ScreenUtil.isMovementTowards(myPrevMouseLocation, mouseEvent.getLocationOnScreen(), getHintBounds())) {
+                myPrevMouseLocation = mouseEvent.getLocationOnScreen();
+                return;
+            }
+            myPrevMouseLocation = mouseEvent.getLocationOnScreen();
 
-			int myStoredModifiers = mouseEvent.getModifiers();
-			final BrowseMode browseMode = myStoredModifiers == 0 ? BrowseMode.Hover : BrowseMode.None;
+            Editor editor = e.getEditor();
+            if (editor.getProject() != null && editor.getProject() != myProject) return;
 
-			if (myTooltipProvider != null) {
-				myTooltipProvider.dispose();
-			}
+            Point point = new Point(mouseEvent.getPoint());
+            final LogicalPosition pos = editor.xyToLogicalPosition(point);
+            int offset = editor.logicalPositionToOffset(pos);
+            int selStart = editor.getSelectionModel().getSelectionStart();
+            int selEnd = editor.getSelectionModel().getSelectionEnd();
 
-			if (browseMode == BrowseMode.None || offset >= selStart && offset < selEnd) {
-				myTooltipAlarm.cancelAllRequests();
-				myTooltipProvider = null;
-				return;
-			}
+            int myStoredModifiers = mouseEvent.getModifiers();
+            final BrowseMode browseMode = myStoredModifiers == 0 ? BrowseMode.Hover : BrowseMode.None;
 
-			myTooltipAlarm.cancelAllRequests();
-			final Editor finalEditor = editor;
-			myTooltipAlarm.addRequest(() -> {
-				if (HintManager.getInstance().hasShownHintsThatWillHideByOtherHint(true)) return;
-				myTooltipProvider = new TooltipProvider(finalEditor, pos);
-				myTooltipProvider.execute(browseMode);
-			}, myData.hoverDelay);
-		}
-	};
+            if (myTooltipProvider != null) {
+                myTooltipProvider.dispose();
+            }
 
-	public MouseHoverHandler(final Project project, StartupManager startupManager,
-							 @NotNull DocumentationManager documentationManager,
-							 @NotNull final EditorFactory editorFactory) {
-		myProject = project;
-		myData = ImageCommentData.getInstance();
-		assert myData != null;
-		startupManager.registerPostStartupActivity(new DumbAwareRunnable() {
-			@Override
-			public void run() {
-				EditorEventMulticaster eventMulticaster = editorFactory.getEventMulticaster();
-				eventMulticaster.addEditorMouseListener(myEditorMouseListener, project);
-				eventMulticaster.addEditorMouseMotionListener(myEditorMouseMotionListener, project);
-				eventMulticaster.addCaretListener(new CaretListener() {
-					@Override
-					public void caretPositionChanged(@NotNull CaretEvent e) {
-						if (myHint != null) {
-							myDocumentationManager.updateToolwindowContext();
-						}
-					}
-				}, project);
-			}
-		});
-		myDocumentationManager = documentationManager;
-		myDocAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, myProject);
-		myTooltipAlarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD, myProject);
-	}
+            if (browseMode == BrowseMode.None || offset >= selStart && offset < selEnd) {
+                myTooltipAlarm.cancelAllRequests();
+                myTooltipProvider = null;
+                return;
+            }
 
-	@Override
-	@NotNull
-	public String getComponentName() {
-		return "MouseHoverHandler";
-	}
+            myTooltipAlarm.cancelAllRequests();
+            final Editor finalEditor = editor;
+            myTooltipAlarm.addRequest(() -> {
+                if (HintManager.getInstance().hasShownHintsThatWillHideByOtherHint(true)) return;
+                myTooltipProvider = new TooltipProvider(finalEditor, pos);
+                myTooltipProvider.execute(browseMode);
+            }, myData.hoverDelay);
+        }
+    };
 
-	private boolean isMouseOverTooltip(@NotNull Point mouseLocationOnScreen) {
-		Rectangle bounds = getHintBounds();
-		return bounds != null && bounds.contains(mouseLocationOnScreen);
-	}
+    public MouseHoverHandler(final Project project, StartupManager startupManager,
+                             @NotNull DocumentationManager documentationManager,
+                             @NotNull final EditorFactory editorFactory) {
+        myProject = project;
+        myData = ImageCommentData.getInstance();
+        assert myData != null;
+        startupManager.registerPostStartupActivity(new DumbAwareRunnable() {
+            @Override
+            public void run() {
+                EditorEventMulticaster eventMulticaster = editorFactory.getEventMulticaster();
+                eventMulticaster.addEditorMouseListener(myEditorMouseListener, project);
+                eventMulticaster.addEditorMouseMotionListener(myEditorMouseMotionListener, project);
+                eventMulticaster.addCaretListener(new CaretListener() {
+                    @Override
+                    public void caretPositionChanged(@NotNull CaretEvent e) {
+                        if (myHint != null) {
+                            myDocumentationManager.updateToolwindowContext();
+                        }
+                    }
+                }, project);
+            }
+        });
+        myDocumentationManager = documentationManager;
+        myDocAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, myProject);
+        myTooltipAlarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD, myProject);
+    }
 
-	@Nullable
-	private Rectangle getHintBounds() {
-		LightweightHint hint = myHint;
-		if (hint == null) {
-			return null;
-		}
-		JComponent hintComponent = hint.getComponent();
-		if (hintComponent == null || !hintComponent.isShowing()) {
-			return null;
-		}
-		return new Rectangle(hintComponent.getLocationOnScreen(), hintComponent.getSize());
-	}
+    @Override
+    @NotNull
+    public String getComponentName() {
+        return "MouseHoverHandler";
+    }
 
-	private abstract static class Info {
-		@NotNull
-		final PsiElement myElementAtPointer;
-		private final List<TextRange> myRanges;
+    private boolean isMouseOverTooltip(@NotNull Point mouseLocationOnScreen) {
+        Rectangle bounds = getHintBounds();
+        return bounds != null && bounds.contains(mouseLocationOnScreen);
+    }
 
-		Info(@NotNull PsiElement elementAtPointer, List<TextRange> ranges) {
-			myElementAtPointer = elementAtPointer;
-			myRanges = ranges;
-		}
+    @Nullable
+    private Rectangle getHintBounds() {
+        LightweightHint hint = myHint;
+        if (hint == null) {
+            return null;
+        }
+        JComponent hintComponent = hint.getComponent();
+        if (hintComponent == null || !hintComponent.isShowing()) {
+            return null;
+        }
+        return new Rectangle(hintComponent.getLocationOnScreen(), hintComponent.getSize());
+    }
 
-		Info(@NotNull PsiElement elementAtPointer) {
-			this(elementAtPointer, Collections.singletonList(new TextRange(elementAtPointer.getTextOffset(),
-					elementAtPointer.getTextOffset() + elementAtPointer.getTextLength())));
-		}
+    private abstract static class Info {
+        @NotNull
+        final PsiElement myElementAtPointer;
+        private final List<TextRange> myRanges;
 
-		List<TextRange> getRanges() {
-			return myRanges;
-		}
+        Info(@NotNull PsiElement elementAtPointer, List<TextRange> ranges) {
+            myElementAtPointer = elementAtPointer;
+            myRanges = ranges;
+        }
 
-		@NotNull
-		public abstract DocInfo getInfo();
+        Info(@NotNull PsiElement elementAtPointer) {
+            this(elementAtPointer, Collections.singletonList(new TextRange(elementAtPointer.getTextOffset(),
+                    elementAtPointer.getTextOffset() + elementAtPointer.getTextLength())));
+        }
 
-		public abstract boolean isValid(Document document);
+        List<TextRange> getRanges() {
+            return myRanges;
+        }
 
-		public abstract void showDocInfo(@NotNull DocumentationManager docManager);
+        @NotNull
+        public abstract DocInfo getInfo();
 
-		boolean rangesAreCorrect(Document document) {
-			final TextRange docRange = new TextRange(0, document.getTextLength());
-			for (TextRange range : getRanges()) {
-				if (!docRange.contains(range)) return false;
-			}
+        public abstract boolean isValid(Document document);
 
-			return true;
-		}
-	}
+        public abstract void showDocInfo(@NotNull DocumentationManager docManager);
 
-	private static void showDumbModeNotification(final Project project) {
-		DumbService.getInstance(project).showDumbModeNotification("Element information is not available during index update");
-	}
+        boolean rangesAreCorrect(Document document) {
+            final TextRange docRange = new TextRange(0, document.getTextLength());
+            for (TextRange range : getRanges()) {
+                if (!docRange.contains(range)) return false;
+            }
 
-	private static class InfoSingle extends Info {
-		private final String result;
+            return true;
+        }
+    }
 
-		InfoSingle(@NotNull PsiElement elementAtPointer, String result) {
-			super(elementAtPointer);
-			this.result = result;
-		}
+    private static void showDumbModeNotification(final Project project) {
+        DumbService.getInstance(project).showDumbModeNotification("Element information is not available during index update");
+    }
 
-		@Override
-		@NotNull
-		public DocInfo getInfo() {
-			try {
-				return ReadAction.compute((ThrowableComputable<DocInfo, IndexNotReadyException>) () ->
-						result == null ? DocInfo.EMPTY : new DocInfo(result, null, myElementAtPointer)
-				);
-			} catch (IndexNotReadyException e) {
-				showDumbModeNotification(myElementAtPointer.getProject());
-				return DocInfo.EMPTY;
-			}
-		}
+    private static class InfoSingle extends Info {
+        private final String result;
 
-		@Override
-		public boolean isValid(Document document) {
-			return myElementAtPointer.isValid() && rangesAreCorrect(document);
-		}
+        InfoSingle(@NotNull PsiElement elementAtPointer, String result) {
+            super(elementAtPointer);
+            this.result = result;
+        }
 
-		@Override
-		public void showDocInfo(@NotNull DocumentationManager docManager) {
-			docManager.setAllowContentUpdateFromContext(false);
-		}
-	}
+        @Override
+        @NotNull
+        public DocInfo getInfo() {
+            try {
+                return ReadAction.compute((ThrowableComputable<DocInfo, IndexNotReadyException>) () ->
+                        result == null ? DocInfo.EMPTY : new DocInfo(result, null, myElementAtPointer)
+                );
+            } catch (IndexNotReadyException e) {
+                showDumbModeNotification(myElementAtPointer.getProject());
+                return DocInfo.EMPTY;
+            }
+        }
 
-	@Nullable
-	private Info getInfoAt(PsiFile file, int offset, BrowseMode browseMode) {
-		if (browseMode == BrowseMode.Hover) {
-			if (PowerSaveMode.isEnabled() || !myData.isHover) return null;
-			final PsiElement elementAtPointer = file.findElementAt(offset);
-			if (elementAtPointer == null) return null;
-			if (!elementAtPointer.getNode().getElementType().toString().toUpperCase().endsWith("COMMENT")) return null;
+        @Override
+        public boolean isValid(Document document) {
+            return myElementAtPointer.isValid() && rangesAreCorrect(document);
+        }
 
-			int cursorOffset = offset - elementAtPointer.getTextOffset();
-			List<CommentUtil.MatchData> matchDataList = CommentUtil.getMatchData(elementAtPointer.getText());
-			CommentUtil.MatchData matchData = null;
-			for (CommentUtil.MatchData data : matchDataList) {
-				int i = cursorOffset - data.startOffset;
-				if (0 <= i && i <= data.text.length()) {
-					matchData = data;
-					break;
-				}
-			}
-			if (matchData == null) return null;
+        @Override
+        public void showDocInfo(@NotNull DocumentationManager docManager) {
+            docManager.setAllowContentUpdateFromContext(false);
+        }
+    }
 
-			return new InfoSingle(elementAtPointer, matchData.getPath());
-		}
+    @Nullable
+    private Info getInfoAt(PsiFile file, int offset, BrowseMode browseMode) {
+        if (browseMode == BrowseMode.Hover) {
+            if (PowerSaveMode.isEnabled() || !myData.isHover) return null;
+            final PsiElement elementAtPointer = file.findElementAt(offset);
+            if (elementAtPointer == null) return null;
+            if (!elementAtPointer.getNode().getElementType().toString().toUpperCase().endsWith("COMMENT")) return null;
 
-		return null;
-	}
+            int cursorOffset = offset - elementAtPointer.getTextOffset();
+            List<CommentUtil.MatchData> matchDataList = CommentUtil.INSTANCE.getMatchData(elementAtPointer.getText());
+            CommentUtil.MatchData matchData = null;
+            for (CommentUtil.MatchData data : matchDataList) {
+                int i = cursorOffset - data.getStartOffset();
+                if (0 <= i && i <= data.getText().length()) {
+                    matchData = data;
+                    break;
+                }
+            }
+            if (matchData == null) return null;
 
-	private class TooltipProvider {
-		private final Editor myEditor;
-		private final LogicalPosition myPosition;
-		private BrowseMode myBrowseMode;
-		private boolean myDisposed;
+            return new InfoSingle(elementAtPointer, matchData.getPath());
+        }
 
-		TooltipProvider(Editor editor, LogicalPosition pos) {
-			myEditor = editor;
-			myPosition = pos;
-		}
+        return null;
+    }
 
-		void dispose() {
-			myDisposed = true;
-		}
+    private class TooltipProvider {
+        private final Editor myEditor;
+        private final LogicalPosition myPosition;
+        private BrowseMode myBrowseMode;
+        private boolean myDisposed;
 
-		void execute(BrowseMode browseMode) {
-			if (myEditor.isDisposed()) return;
+        TooltipProvider(Editor editor, LogicalPosition pos) {
+            myEditor = editor;
+            myPosition = pos;
+        }
 
-			myBrowseMode = browseMode;
+        void dispose() {
+            myDisposed = true;
+        }
 
-			Document document = myEditor.getDocument();
-			final PsiFile file = PsiDocumentManager.getInstance(myProject).getPsiFile(document);
-			if (file == null) return;
+        void execute(BrowseMode browseMode) {
+            if (myEditor.isDisposed()) return;
 
-			if (myEditor.isDisposed() || EditorUtil.inVirtualSpace(myEditor, myPosition)) {
-				return;
-			}
+            myBrowseMode = browseMode;
 
-			final int offset = myEditor.logicalPositionToOffset(myPosition);
+            Document document = myEditor.getDocument();
+            final PsiFile file = PsiDocumentManager.getInstance(myProject).getPsiFile(document);
+            if (file == null) return;
 
-			int selStart = myEditor.getSelectionModel().getSelectionStart();
-			int selEnd = myEditor.getSelectionModel().getSelectionEnd();
+            if (myEditor.isDisposed() || EditorUtil.inVirtualSpace(myEditor, myPosition)) {
+                return;
+            }
 
-			if (offset >= selStart && offset < selEnd) return;
-			ApplicationManager.getApplication().executeOnPooledThread(() ->
-					ProgressIndicatorUtils.scheduleWithWriteActionPriority(new ReadTask() {
-				@Override
-				public void computeInReadAction(@NotNull ProgressIndicator indicator) {
-					doExecute(file, offset);
-				}
+            final int offset = myEditor.logicalPositionToOffset(myPosition);
 
-				@Override
-				public void onCanceled(@NotNull ProgressIndicator indicator) {
-				}
-			}));
-		}
+            int selStart = myEditor.getSelectionModel().getSelectionStart();
+            int selEnd = myEditor.getSelectionModel().getSelectionEnd();
 
-		private void doExecute(PsiFile file, int offset) {
-			final Info info;
-			try {
-				info = getInfoAt(file, offset, myBrowseMode);
-			} catch (IndexNotReadyException e) {
-				showDumbModeNotification(myProject);
-				return;
-			}
-			if (info == null) return;
+            if (offset >= selStart && offset < selEnd) return;
+            ApplicationManager.getApplication().executeOnPooledThread(() ->
+                    ProgressIndicatorUtils.scheduleWithWriteActionPriority(new ReadTask() {
+                        @Override
+                        public void computeInReadAction(@NotNull ProgressIndicator indicator) {
+                            doExecute(file, offset);
+                        }
 
-			ApplicationManager.getApplication().invokeLater(() -> {
-				if (myDisposed || myEditor.isDisposed() ||
-						!myEditor.getComponent().isShowing() || !info.isValid(myEditor.getDocument())) return;
+                        @Override
+                        public void onCanceled(@NotNull ProgressIndicator indicator) {
+                        }
+                    }));
+        }
 
-				DocInfo docInfo = info.getInfo();
-				if (docInfo.text == null) return;
+        private void doExecute(PsiFile file, int offset) {
+            final Info info;
+            try {
+                info = getInfoAt(file, offset, myBrowseMode);
+            } catch (IndexNotReadyException e) {
+                showDumbModeNotification(myProject);
+                return;
+            }
+            if (info == null) return;
 
-				if (myDocumentationManager.hasActiveDockedDocWindow()) {
-					info.showDocInfo(myDocumentationManager);
-				}
+            ApplicationManager.getApplication().invokeLater(() -> {
+                if (myDisposed || myEditor.isDisposed() ||
+                        !myEditor.getComponent().isShowing() || !info.isValid(myEditor.getDocument())) return;
 
-				if (docInfo.documentationAnchor == null) return;
-				URL absoluteURL = CommentUtil.getAbsoluteURL(docInfo.documentationAnchor, docInfo.text);
-				CommentUtil.ImageData imageData = CommentUtil.loadImage(absoluteURL);
-				if (imageData == null) return;
+                DocInfo docInfo = info.getInfo();
+                if (docInfo.text == null) return;
 
-				LightweightHint hint = new LightweightHint(new JLabel(new ImageIcon(imageData.getThumbnail())));
-				myHint = hint;
-				hint.addHintListener(event -> myHint = null);
-				myDocAlarm.cancelAllRequests();
+                if (myDocumentationManager.hasActiveDockedDocWindow()) {
+                    info.showDocInfo(myDocumentationManager);
+                }
 
-				HintManagerImpl hintManager = HintManagerImpl.getInstanceImpl();
-				Point p = HintManagerImpl.getHintPosition(hint, myEditor, myPosition, HintManager.ABOVE);
-				hintManager.showEditorHint(hint, myEditor, p,
-						HintManager.HIDE_BY_ESCAPE | HintManager.HIDE_BY_TEXT_CHANGE | HintManager.HIDE_BY_SCROLLING,
-						0, false, HintManagerImpl.createHintHint(myEditor, p, hint, HintManager.ABOVE).setContentActive(false));
-			});
-		}
+                if (docInfo.documentationAnchor == null) return;
+                byte[] bytes = CommentUtil.INSTANCE.getImageByteArray(docInfo.documentationAnchor, docInfo.text);
+                if (bytes == null) {
+                    return;
+                }
+                BufferedImage bufferedImage;
+                try (InputStream is = new ByteArrayInputStream(bytes)) {
+                    bufferedImage = ImageIO.read(is);
+                } catch (IOException e) {
+                    return;
+                }
+                Image scaledImage = ImageUtil.scaleImage(
+                        bufferedImage,
+                        THUMBNAIL_SIZE / Math.max(bufferedImage.getWidth(), bufferedImage.getHeight())
+                );
 
-	}
+                LightweightHint hint = new LightweightHint(new JLabel(new ImageIcon(scaledImage)));
+                myHint = hint;
+                hint.addHintListener(event -> myHint = null);
+                myDocAlarm.cancelAllRequests();
 
-	private static class DocInfo {
-		static final DocInfo EMPTY = new DocInfo(null, null, null);
+                HintManagerImpl hintManager = HintManagerImpl.getInstanceImpl();
+                Point p = HintManagerImpl.getHintPosition(hint, myEditor, myPosition, HintManager.ABOVE);
+                hintManager.showEditorHint(hint, myEditor, p,
+                        HintManager.HIDE_BY_ESCAPE | HintManager.HIDE_BY_TEXT_CHANGE | HintManager.HIDE_BY_SCROLLING,
+                        0, false, HintManagerImpl.createHintHint(myEditor, p, hint, HintManager.ABOVE).setContentActive(false));
+            });
+        }
 
-		@Nullable
-		final String text;
-		@Nullable
-		final DocumentationProvider docProvider;
-		@Nullable
-		final PsiElement documentationAnchor;
+    }
 
-		DocInfo(@Nullable String text, @Nullable DocumentationProvider provider, @Nullable PsiElement documentationAnchor) {
-			this.text = text;
-			docProvider = provider;
-			this.documentationAnchor = documentationAnchor;
-		}
-	}
+    private static class DocInfo {
+        static final DocInfo EMPTY = new DocInfo(null, null, null);
+
+        @Nullable
+        final String text;
+        @Nullable
+        final DocumentationProvider docProvider;
+        @Nullable
+        final PsiElement documentationAnchor;
+
+        DocInfo(@Nullable String text, @Nullable DocumentationProvider provider, @Nullable PsiElement documentationAnchor) {
+            this.text = text;
+            docProvider = provider;
+            this.documentationAnchor = documentationAnchor;
+        }
+    }
 }
