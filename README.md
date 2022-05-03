@@ -5,6 +5,8 @@
 [![Downloads](https://img.shields.io/jetbrains/plugin/d/11170.svg)](https://plugins.jetbrains.com/plugin/11170)
 
 <!-- Plugin description -->
+Provides functionality to display local images specified in Markdown format
+
 ### Getting Started
 1. Write `![imageAlt](/path/to/image)` in comment!
 <!-- Plugin description end -->

@@ -3,6 +3,8 @@
 # ImageComment Changelog
 
 ## [Unreleased]
+
+## [1.0.3] - 2022-05-03
 ### Changed
 - Apply scaffold from [IntelliJ Platform Plugin Template](https://github.com/JetBrains/intellij-platform-plugin-template)
 - Rewrite lineMarkerProvider
